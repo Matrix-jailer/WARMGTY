@@ -30,7 +30,8 @@ def install_playwright_once():
     if not os.path.exists(LOCK_FILE):
         print("[+] Installing Playwright browsers...")
         try:
-            subprocess.run(["playwright", "install", "--with-deps"], check=True)
+            subprocess.run(["playwright", "install", "chromium"], check=True)
+
             with open(LOCK_FILE, "w") as f:
                 f.write("installed")
             print("[+] Playwright installation complete.")
