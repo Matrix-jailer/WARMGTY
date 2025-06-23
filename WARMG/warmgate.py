@@ -2,6 +2,7 @@
 
 import sys
 import os
+os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/opt/render/data/playwright'
 import re
 import subprocess
 import time
