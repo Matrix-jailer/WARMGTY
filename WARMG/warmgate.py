@@ -30,8 +30,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # File paths for persistent storage
-DATA_DIR = "/app/data"
-LOCK_FILE = os.path.join(DATA_DIR, ".playwright_installed.lock")
+DATA_DIR = "/opt/render/data"
+LOCK_FILE = os.path.join(DATA_DIR, "playwright/.playwright_installed.lock")
 REGISTERED_USERS_FILE = os.path.join(DATA_DIR, "registered_users.json")
 ADMIN_ACCESS_FILE = os.path.join(DATA_DIR, "adminaccess.json")
 CREDIT_CODES_FILE = os.path.join(DATA_DIR, "creditcodes.json")
@@ -42,8 +42,8 @@ def install_playwright_once():
     if not os.path.exists(LOCK_FILE):
         print("[+] Installing Playwright browsers...")
         try:
+            os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
             subprocess.run(["playwright", "install", "chromium"], check=True)
-            os.makedirs(DATA_DIR, exist_ok=True)
             with open(LOCK_FILE, "w") as f:
                 f.write("installed")
             print("[+] Playwright installation complete.")
@@ -159,11 +159,10 @@ def escape_markdown(text):
 
 # JSON Utilities
 def load_json(file_path):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    if not os.path.exists(file_path):
-        logger.warning(f"File {file_path} does not exist, returning empty dict")
-        return {}
     try:
+        if not os.path.exists(file_path):
+            logger.warning(f"File {file_path} does not exist, returning empty dict")
+            return {}
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
             if not content.strip():
@@ -182,9 +181,12 @@ def load_json(file_path):
         return {}
 
 def save_json(file_path, data):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(file_path, "w") as f:
-        json.dump(data, f)
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.error(f"Error saving {file_path}: {e}")
 
 def load_registered_users():
     return load_json(REGISTERED_USERS_FILE)
@@ -1011,6 +1013,19 @@ async def xenexunbanuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     logger.info(f"Xenexunbanuser command processed for user {user_id}")
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors and notify the user."""
+    logger.error(f"Update {update} caused error {context.error}")
+    if update and update.message:
+        try:
+            await update.message.reply_text(
+                f"**❌ An error occurred: {escape_markdown(str(context.error))}**\n"
+                "📩 Please try again or contact @Gen666Z for support.\n",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}")
+
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1052,6 +1067,7 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("xenexunbanuser", xenexunbanuser))
         application.add_handler(CallbackQueryHandler(button_handler))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
+        application.add_error_handler(error_handler)
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Bot failed to start: {str(e)}")
