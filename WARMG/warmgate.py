@@ -649,6 +649,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    user = update.effective_user  # ✅ ADD THIS LINE
+
     if not context.user_data.get("awaiting_url", False):
         return
     context.user_data["awaiting_url"] = False
