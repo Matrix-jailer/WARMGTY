@@ -451,7 +451,76 @@ async def validate_url(url):
         return False, f"Validation error: {str(e)}"
 
 # Web Scanning Functions
+
+import cloudscraper
+import ssl
+
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15',
+    'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Mobile Safari/537.36',
+]
+
+def fetch_with_cloudscraper(url, max_retries=3):
+    scraper = cloudscraper.create_scraper(
+        browser={"custom": random.choice(USER_AGENTS)}
+    )
+    scraper.mount("https://", requests.adapters.HTTPAdapter(max_retries=3))
+    scraper.ssl_context = ssl.create_default_context()
+    scraper.ssl_context.check_hostname = False
+    scraper.ssl_context.verify_mode = ssl.CERT_NONE
+
+    for attempt in range(max_retries):
+        try:
+            response = scraper.get(url, timeout=30)
+            if response.ok and response.text.strip():
+                return response.text
+        except Exception as e:
+            logger.warning(f"Cloudscraper failed for {url} (attempt {attempt+1}): {e}")
+            time.sleep(1)
+    return None
+
+def analyze_html_content(html_content):
+    result = {
+        "payment_gateways": set(),
+        "captcha": False,
+        "cloudflare": False,
+        "graphql": False,
+        "platforms": set(),
+        "card_support": set(),
+        "is_3d_secure": False,
+    }
+
+    lower_html = html_content.lower()
+    for gateway in PAYMENT_GATEWAYS:
+        if gateway in lower_html:
+            result["payment_gateways"].add(gateway.capitalize())
+            if any(kw in lower_html for kw in THREE_D_SECURE_KEYWORDS):
+                result["is_3d_secure"] = True
+
+    if any(re.search(pattern, html_content, re.IGNORECASE) for pattern in CAPTCHA_PATTERNS):
+        result["captcha"] = True
+
+    result["graphql"] = "graphql" in lower_html
+    result["cloudflare"] = "cloudflare" in lower_html
+
+    for keyword, name in PLATFORM_KEYWORDS.items():
+        if keyword in lower_html:
+            result["platforms"].add(name)
+
+    for card in CARD_KEYWORDS:
+        if card in lower_html:
+            result["card_support"].add(card.capitalize())
+
+    return result
+
 async def scan_page(url, browser, retries=3, timeout=10000):
+    # Step 0: Attempt CloudScraper before Playwright
+    html_content = fetch_with_cloudscraper(url)
+    if html_content:
+        logger.info(f"✔ CloudScraper used for {url}")
+        return analyze_html_content(html_content)
+
     result = {
         "payment_gateways": set(),
         "captcha": False,
