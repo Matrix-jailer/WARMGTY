@@ -1,6 +1,7 @@
 # @Gen666Z
 
 import sys
+import subprocess
 import os
 import re
 import time
@@ -21,6 +22,25 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, NetworkError, TimedOut
 from tqdm import tqdm
 from colorama import Fore, Style
+
+
+LOCK_FILE = ".playwright_installed.lock"
+
+def install_playwright_once():
+    if not os.path.exists(LOCK_FILE):
+        print("[+] Installing Playwright browsers...")
+        try:
+            subprocess.run(["playwright", "install", "--with-deps"], check=True)
+            with open(LOCK_FILE, "w") as f:
+                f.write("installed")
+            print("[+] Playwright installation complete.")
+        except Exception as e:
+            print(f"[ERROR] Playwright installation failed: {e}")
+    else:
+        print("[✓] Playwright already installed. Skipping...")
+
+# Run it once per deployment
+install_playwright_once()
 
 def escape_markdown(text):
     """Escape special Markdown characters to prevent parsing errors."""
