@@ -13,6 +13,7 @@ import tldextract
 import asyncio
 import json
 import requests
+import signal
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
@@ -28,14 +29,21 @@ import logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-LOCK_FILE = ".playwright_installed.lock"
+# File paths for persistent storage
+DATA_DIR = "/app/data"
+LOCK_FILE = os.path.join(DATA_DIR, ".playwright_installed.lock")
+REGISTERED_USERS_FILE = os.path.join(DATA_DIR, "registered_users.json")
+ADMIN_ACCESS_FILE = os.path.join(DATA_DIR, "adminaccess.json")
+CREDIT_CODES_FILE = os.path.join(DATA_DIR, "creditcodes.json")
+BAN_USERS_FILE = os.path.join(DATA_DIR, "banusers.json")
+BOARD_MESSAGE_FILE = os.path.join(DATA_DIR, "boardmessage.json")
 
 def install_playwright_once():
     if not os.path.exists(LOCK_FILE):
         print("[+] Installing Playwright browsers...")
         try:
             subprocess.run(["playwright", "install", "chromium"], check=True)
-
+            os.makedirs(DATA_DIR, exist_ok=True)
             with open(LOCK_FILE, "w") as f:
                 f.write("installed")
             print("[+] Playwright installation complete.")
@@ -47,8 +55,7 @@ def install_playwright_once():
 # Run it once per deployment
 install_playwright_once()
 
-
-# Color definitions (for potential future use)
+# Color definitions
 merah = Fore.LIGHTRED_EX
 putih = Fore.LIGHTWHITE_EX
 hijau = Fore.LIGHTGREEN_EX
@@ -59,11 +66,6 @@ reset = Style.RESET_ALL
 # Telegram Bot Configurations
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FORWARD_CHANNEL_ID = "@mddj77273jdjdjd838383"
-REGISTERED_USERS_FILE = "registered_users.json"
-ADMIN_ACCESS_FILE = "adminaccess.json"
-CREDIT_CODES_FILE = "creditcodes.json"
-BAN_USERS_FILE = "banusers.json"
-BOARD_MESSAGE_FILE = "boardmessage.json"
 
 # Extended Lists
 RELATED_PAGES = [
@@ -145,8 +147,19 @@ TIME_CONVERSIONS = {
     "year": 31536000
 }
 
+# Markdown Escaping
+def escape_markdown(text):
+    """Escape special Markdown characters to prevent parsing errors."""
+    if not text:
+        return text
+    special_chars = r'_*[]()~`>#+-.!|'
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 # JSON Utilities
 def load_json(file_path):
+    os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(file_path):
         logger.warning(f"File {file_path} does not exist, returning empty dict")
         return {}
@@ -169,6 +182,7 @@ def load_json(file_path):
         return {}
 
 def save_json(file_path, data):
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(file_path, "w") as f:
         json.dump(data, f)
 
@@ -188,7 +202,7 @@ def register_user(user_id, update):
         registered[str(user_id)] = {
             "credits": 10,
             "join_date": time.time(),
-            "username": f"@{update.effective_user.username}" if update.effective_user.username else f"User_{user_id}"
+            "username": f"@{escape_markdown(update.effective_user.username)}" if update.effective_user.username else f"User_{user_id}"
         }
         save_registered_users(registered)
 
@@ -213,7 +227,7 @@ def add_credit(user_id, amount, update):
         registered[str(user_id)] = {
             "credits": amount,
             "join_date": time.time(),
-            "username": f"@{update.effective_user.username}" if update.effective_user.username else f"User_{user_id}"
+            "username": f"@{escape_markdown(update.effective_user.username)}" if update.effective_user.username else f"User_{user_id}"
         }
         save_registered_users(registered)
 
@@ -276,10 +290,11 @@ def ban_user(user_id, reason, time_period):
         expires = "permanent"
     else:
         try:
-            time_value, time_unit = int(time_period[:-len(time_period.partition(time_period[-1])[0]) - 1]), time_period[-1]
+            time_value = int(time_period[:-1])
+            time_unit = time_period[-1]
             expires = time.time() + (time_value * TIME_CONVERSIONS.get(time_unit, 0))
         except (ValueError, IndexError):
-            expires = time.time() + 86400  # Default to 1 day if invalid format
+            expires = time.time() + 86400  # Default to 1 day
     ban_users[str(user_id)] = {
         "id": str(user_id),
         "date": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -301,7 +316,8 @@ def load_board_message():
 
 # URL Validation
 async def validate_url(url):
-    domain = tldextract.extract(url).top_domain_under_public_suffix
+    extracted = tldextract.extract(url)
+    domain = extracted.registered_domain
     if not domain:
         return False, "Invalid URL: No valid domain found."
 
@@ -417,14 +433,14 @@ async def scan_page(url, browser, retries=3):
             await page.close()
             return result
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout error for {url}: {str(e)}")
+            logger.error(f"Timeout error for {url}: {e}")
             if attempt < retries - 1:
                 delay = 2 ** attempt + random.uniform(0, 1)
                 logger.warning(f"Timeout for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
                 await asyncio.sleep(delay)
                 continue
         except Exception as e:
-            logger.error(f"Scan error for {url}: {str(e)}")
+            logger.error(f"Scan error for {url}: {e}")
             if attempt < retries - 1:
                 delay = 2 ** attempt + random.uniform(0, 1)
                 logger.warning(f"Error for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
@@ -510,7 +526,7 @@ async def show_progress_bar(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 # Telegram Bot Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_link = f"[@{user.username}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
+    user_link = f"[@{escape_markdown(user.username)}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
     keyboard = [
         [{"text": "📝 Register", "callback_data": "register"}, {"text": "🔍 Check URL", "callback_data": "checkurl"}],
         [{"text": "💰 Credits", "callback_data": "credits"}, {"text": "👨‍💼 Admin", "callback_data": "admin"}]
@@ -532,7 +548,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
         context.user_data["message_id"] = message.message_id
     else:
-        await update.callback_query.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        try:
+            await update.callback_query.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                logger.error(f"Failed to edit message in start: {e}")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -548,92 +568,136 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action := query.data:
         if action == "register":
             if is_user_banned(user_id):
-                await query.edit_message_text(
-                    "**🚫 You are banned!**\n"
-                    "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 You are banned!**\n"
+                        "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in register (banned): {e}")
             elif is_user_registered(user_id):
-                await query.edit_message_text(
-                    "**🚫 You are already registered!**\n"
-                    f"💰 **Credits: {get_user_credits(user_id)}**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 You are already registered!**\n"
+                        f"💰 **Credits: {get_user_credits(user_id)}**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in register (already registered): {e}")
             else:
                 register_user(user_id, update)
-                await query.edit_message_text(
-                    "**✅ Registration Successful!**\n"
-                    f"💰 **You received 10 credits! Current: 10**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
+                try:
+                    await query.edit_message_text(
+                        "**✅ Registration Successful!**\n"
+                        f"💰 **You received 10 credits! Current: 10**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in register (success): {e}")
         elif action == "checkurl":
             credits = get_user_credits(user_id)
             if is_user_banned(user_id):
-                await query.edit_message_text(
-                    "**🚫 You are banned!**\n"
-                    "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 You are banned!**\n"
+                        "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (banned): {e}")
             elif not is_user_registered(user_id):
-                await query.edit_message_text(
-                    "**🚫 Please register first!**\n"
-                    "📝 **Click 'Register' to get started.**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 Please register first!**\n"
+                        "📝 **Click 'Register' to get started.**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (not registered): {e}")
             elif credits <= 0:
-                await query.edit_message_text(
-                    "**💸 Out of Credits!**\n"
-                    "🔴 **Your credits have run out!**\n"
-                    "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
+                try:
+                    await query.edit_message_text(
+                        "**💸 Out of Credits!**\n"
+                        "🔴 **Your credits have run out!**\n"
+                        "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (no credits): {e}")
             else:
-                await query.edit_message_text(
-                    "**🔍 Enter URL to Check**\n"
-                    f"💰 **Credits: {credits} (1 credit will be deducted)**\n"
-                    "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
-                context.user_data["awaiting_url"] = True
+                try:
+                    await query.edit_message_text(
+                        "**🔍 Enter URL to Check**\n"
+                        f"💰 **Credits: {credits} (1 credit will be deducted)**\n"
+                        "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                    context.user_data["awaiting_url"] = True
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (prompt): {e}")
         elif action == "credits":
             credits = get_user_credits(user_id)
             if is_user_banned(user_id):
-                await query.edit_message_text(
-                    "**🚫 You are banned!**\n"
-                    "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 You are banned!**\n"
+                        "📩 **Try to contact Owner to get Unban: @Gen666Z*\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in credits (banned): {e}")
             elif not is_user_registered(user_id):
-                await query.edit_message_text(
-                    "**🚫 Please register first!**\n"
-                    "📝 **Click 'Register' to get started.**\n\n",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=reply_markup
-                )
+                try:
+                    await query.edit_message_text(
+                        "**🚫 Please register first!**\n"
+                        "📝 **Click 'Register' to get started.**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in credits (not registered): {e}")
             else:
+                try:
+                    await query.edit_message_text(
+                        f"**💰 Your Credits**\n"
+                        f"🔢 **Available: {credits} credits**\n"
+                        f"🔄 **1 credit per URL check**\n"
+                        f"🔧 **Contact admin to recharge if needed!**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in credits (show): {e}")
+        elif action == "admin":
+            try:
                 await query.edit_message_text(
-                    f"**💰 Your Credits**\n"
-                    f"🔢 **Available: {credits} credits**\n"
-                    f"🔄 **1 credit per URL check**\n"
-                    f"🔧 **Contact admin to recharge if needed!**\n\n",
+                    "**👨‍💼 Contact Admin**\n"
+                    "📩 **Reach out to @Gen666Z for support or recharges!**\n\n",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=reply_markup
                 )
-        elif action == "admin":
-            await query.edit_message_text(
-                "**👨‍💼 Contact Admin**\n"
-                "📩 **Reach out to @Gen666Z for support or recharges!**\n\n",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=reply_markup
-            )
+            except BadRequest as e:
+                if "Message is not modified" not in str(e):
+                    logger.error(f"Failed to edit message in admin: {e}")
         elif action == "back":
             await start(update, context)
 
@@ -681,7 +745,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_valid, message = await validate_url(url)
     if not is_valid:
         await update.message.reply_text(
-            f"**❌ Invalid URL!**\n{message}\n\n",
+            f"**❌ Invalid URL!**\n{escape_markdown(message)}\n\n",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=create_inline_keyboard([[{"text": "🔙 Back", "callback_data": "back"}]])
         )
@@ -693,14 +757,12 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     while attempt < max_attempts:
         try:
             start_time = time.time()
-            # Initialize progress bar and get message and update callback
             progress_message, update_progress = await show_progress_bar(update, context, len(RELATED_PAGES))
-            # Pass progress callback to scan_site_parallel
             results = await scan_site_parallel(url, progress_callback=update_progress)
             processing_time = time.time() - start_time
 
             user = update.effective_user
-            user_link = f"[@{user.username}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
+            user_link = f"[@{escape_markdown(user.username)}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
             credits_left = get_user_credits(user_id)
             gateways = ', '.join(sorted(results['payment_gateways'])) if results['payment_gateways'] else 'None found'
             platforms = ', '.join(sorted(results['platforms'])) if results['platforms'] else 'Unknown'
@@ -708,14 +770,14 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_3d_secure_text = f"🔐 **3D Secure:** {'ENABLED' if results['is_3d_secure'] else 'DISABLED'}\n"
 
             result_text = (
-                f"**🟢 Scan Results for {url}**\n"
+                f"**🟢 Scan Results for {escape_markdown(url)}**\n"
                 f"**⏱️ Time Taken:** {round(processing_time, 2)} seconds\n"
-                f"**💳 Payment Gateways:** {gateways.replace('<', '<').replace('>', '>')}\n"
+                f"**💳 Payment Gateways:** {escape_markdown(gateways)}\n"
                 f"**🔒 Captcha:** {'Found ✅' if results['captcha'] else 'Not Found 🔥'}\n"
                 f"**☁️ Cloudflare:** {'Found ✅' if results['cloudflare'] else 'Not Found 🔥'}\n"
                 f"**📊 GraphQL:** {results['graphql']}\n"
-                f"**🏬 Platforms:** {platforms.replace('<', '<').replace('>', '>')}\n"
-                f"**💵 Card Support:** {cards.replace('<', '<').replace('>', '>')}\n"
+                f"**🏬 Platforms:** {escape_markdown(platforms)}\n"
+                f"**💵 Card Support:** {escape_markdown(cards)}\n"
                 f"{is_3d_secure_text}"
                 f"**💰 Credit Left:** {credits_left}\n"
                 f"**🆔 Scanned by:** {user_link}\n"
@@ -725,6 +787,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except telegram.error.BadRequest as e:
                 if "Message is not modified" not in str(e):
                     logger.error(f"Failed to edit final message: {e}")
+                    await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
             except telegram.error.TimedOut:
                 logger.warning("Telegram API timed out during final message update")
                 await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
@@ -745,36 +808,28 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Network error occurred: {e}. Attempt {attempt}/{max_attempts}. Retrying in {2 ** attempt} seconds...")
             await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
             if attempt == max_attempts:
+                error_text = f"**❌ Failed to check URL due to network issues: {escape_markdown(str(e))}**\n\n"
                 try:
-                    await progress_message.edit_text(
-                        f"**❌ Failed to check URL due to network issues: {e}**\n\n",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
+                    await progress_message.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
                 except telegram.error.BadRequest as e:
                     if "Message is not modified" not in str(e):
                         logger.error(f"Failed to edit error message: {e}")
+                    await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
                 except telegram.error.TimedOut:
                     logger.warning("Telegram API timed out during error message update")
-                    await update.message.reply_text(
-                        f"**❌ Failed to check URL due to network issues: {e}**\n\n",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
+                    await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
             logger.error(f"Error checking URL {url}: {e}")
+            error_text = f"**❌ Error checking URL: {escape_markdown(str(e))}**\n\n"
             try:
-                await progress_message.edit_text(
-                    f"**❌ Error checking URL: {e}**\n\n",
-                    parse_mode=ParseMode.MARKDOWN
-                )
+                await progress_message.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
             except telegram.error.BadRequest as e:
                 if "Message is not modified" not in str(e):
                     logger.error(f"Failed to edit error message: {e}")
+                    await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
             except telegram.error.TimedOut:
                 logger.warning("Telegram API timed out during error message update")
-                await update.message.reply_text(
-                    f"**❌ Error checking URL: {e}**\n\n",
-                    parse_mode=ParseMode.MARKDOWN
-                )
+                await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
             break
 
     await start(update, context)
@@ -970,22 +1025,34 @@ def create_inline_keyboard(buttons):
     keyboard = [[InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) for btn in row if isinstance(btn, dict)] for row in buttons if any(isinstance(btn, dict) for btn in row)]
     return InlineKeyboardMarkup(keyboard)
 
+# Signal Handling
+application = None
+
+def handle_shutdown(signum, frame):
+    logger.info(f"Received signal {signum}, shutting down...")
+    if application:
+        asyncio.run(application.shutdown())
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_shutdown)
+signal.signal(signal.SIGTERM, handle_shutdown)
+
 # Main
 if __name__ == "__main__":
     try:
-        app = Application.builder().token(BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("url", url_handler))
-        app.add_handler(CommandHandler("redeem", redeem))
-        app.add_handler(CommandHandler("xenex", xenex))
-        app.add_handler(CommandHandler("xenexgen", xenexgen))
-        app.add_handler(CommandHandler("xenexboard", xenexboard))
-        app.add_handler(CommandHandler("xenexaddcredit", xenexaddcredit))
-        app.add_handler(CommandHandler("xenexbanuser", xenexbanuser))
-        app.add_handler(CommandHandler("xenexunbanuser", xenexunbanuser))
-        app.add_handler(CallbackQueryHandler(button_handler))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        application = Application.builder().token(BOT_TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("url", url_handler))
+        application.add_handler(CommandHandler("redeem", redeem))
+        application.add_handler(CommandHandler("xenex", xenex))
+        application.add_handler(CommandHandler("xenexgen", xenexgen))
+        application.add_handler(CommandHandler("xenexboard", xenexboard))
+        application.add_handler(CommandHandler("xenexaddcredit", xenexaddcredit))
+        application.add_handler(CommandHandler("xenexbanuser", xenexbanuser))
+        application.add_handler(CommandHandler("xenexunbanuser", xenexunbanuser))
+        application.add_handler(CallbackQueryHandler(button_handler))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Bot failed to start: {str(e)}")
         sys.exit(1)
