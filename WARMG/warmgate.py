@@ -694,7 +694,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         await query.edit_message_text(
                             "**🔍 Enter URL to Check**\n"
-                            f"\n💰 **Credits: {credits} (1 credit will be deducted)"}\n"
+                            f"\n💰 **Credits: {credits} (1 credit will be deducted)"\n"
                             "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
                             parse_mode=ParseMode.MARKDOWN,
                             reply_markup=reply_markup
