@@ -115,7 +115,7 @@ PLATFORM_KEYWORDS = {
     "opencart": "OpenCart",
     "wix": "Wix",
     "squarespace": "Squarespace"
-}
+]
 
 CARD_KEYWORDS = [
     "visa", "mastercard", "amex", "discover", "diners", "jcb", "unionpay",
@@ -172,8 +172,7 @@ def escape_markdown(text, is_url=False):
     if not text:
         return text
     if is_url:
-        # For URLs, only escape minimal characters to avoid breaking the link
-        special_chars = r'[]()~`>#+-!|'
+        special_chars = r'[]()~`>#+-!|'  # Exclude dot
     else:
         special_chars = r'_*[]()~`>#+-.!|'
     for char in special_chars:
@@ -277,7 +276,7 @@ def add_admin(user_id):
     asyncio.create_task(remove_admin_access_after_delay(user_id))
 
 async def remove_admin_access_after_delay(user_id):
-    await asyncio.sleep(300)  # 5 minute
+    await asyncio.sleep(300)  # 5 minutes
     admin_access = load_admin_access()
     if str(user_id) in admin_access:
         del admin_access[str(user_id)]
@@ -318,15 +317,15 @@ def ban_user(user_id, reason, time_period):
             time_unit = time_period[-1]
             expires = time.time() + (time_value * TIME_CONVERSIONS.get(time_unit, 0))
         except (ValueError, IndexError):
-            expires = time.time() + 3600  # Default to 1 day
-        ban_users[str(user_id)] = {
-            "id": str(user_id),
-            "date": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "reason": reason,
-            "credits_last_time": credits,
-            "expires": expires
-        }
-        save_ban_users(ban_users)
+            expires = time.time() + 86400  # Default to 1 day
+    ban_users[str(user_id)] = {
+        "id": str(user_id),
+        "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "reason": reason,
+        "credits_last_time": credits,
+        "expires": expires
+    }
+    save_ban_users(ban_users)
 
 def unban_user(user_id):
     ban_users = load_ban_users()
@@ -345,13 +344,11 @@ async def validate_url(url):
     if not domain:
         return False, "Invalid URL: No valid domain found."
 
-    # Check DNS resolution
     try:
         socket.gethostbyname(domain)
     except socket.gaierror:
         return False, "Unresolvable DNS: Cannot connect to host."
 
-    # Check HTTP accessibility and bot detection
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url, allow_redirects=True, timeout=5) as resp:
@@ -381,7 +378,6 @@ async def scan_page(url, browser, retries=3, timeout=10000):
     }
     for attempt in range(retries):
         try:
-            # Pre-validate URL with aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, allow_redirects=True, timeout=5) as resp:
                     if resp.status == 429:
@@ -390,7 +386,7 @@ async def scan_page(url, browser, retries=3, timeout=10000):
                         await asyncio.sleep(delay)
                         continue
                     if resp.status != 200:
-                        logger.debug(f"Non-200 status for {url}: {resp.status}")  # Changed to debug to reduce noise
+                        logger.debug(f"Non-200 status for {url}: {resp.status}")
                         return result
                     result["cloudflare"] = "cloudflare" in dict(resp.headers).get("server", "").lower()
 
@@ -456,9 +452,9 @@ async def scan_page(url, browser, retries=3, timeout=10000):
             for gateway in PAYMENT_GATEWAYS:
                 if gateway in html_content.lower():
                     result["payment_gateways"].add(gateway.capitalize())
-                    if any(kw in html_content.lower() for kw in GATEWAY_KEYWORDS.get(gateway, []) 
-                           if kw in THREE_D_SECURE_KEYWORDS):
-                        result["is_3d_secure"] = True
+                    for kw in GATEWAY_KEYWORDS.get(gateway, []):
+                        if kw in THREE_D_SECURE_KEYWORDS and kw in html_content.lower():
+                            result["is_3d_secure"] = True
 
             if any(re.search(pattern, html_content, re.IGNORECASE) for pattern in CAPTCHA_PATTERNS):
                 result["captcha"] = True
@@ -511,7 +507,6 @@ async def scan_site_parallel(base_url, progress_callback=None):
         async def limited_scan(url):
             async with sem:
                 try:
-                    # Wrap scan_page in a timeout to prevent hanging
                     return await asyncio.wait_for(
                         scan_page(url, browser, timeout=10000),
                         timeout=15
@@ -527,10 +522,9 @@ async def scan_site_parallel(base_url, progress_callback=None):
         total_pages = len(full_urls)
         tasks = [limited_scan(url) for url in full_urls]
         try:
-            # Process tasks with a global timeout for the entire scan
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=60 * len(full_urls) // len(tasks)  # 60s per batch of 2
+                timeout=60 * len(full_urls) // len(tasks)
             )
             for page_results in results:
                 if isinstance(page_results, dict):
@@ -544,7 +538,7 @@ async def scan_site_parallel(base_url, progress_callback=None):
                 completed_pages += 1
                 if progress_callback:
                     await progress_callback(completed_pages, total_pages)
-                    await asyncio.sleep(0.1)  # Avoid Telegram rate limits
+                    await asyncio.sleep(0.1)
         except asyncio.TimeoutError:
             logger.warning(f"Global scan timeout for {base_url}, returning partial results")
         finally:
@@ -561,7 +555,7 @@ async def show_progress_bar(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         current_percent = min(int((current / total) * 100), 100)
         if current_percent > last_percent:
             filled = int((current_percent / 100) * bar_length)
-            progress = "🟥" * filled + "⬜" * (bar_length - filled) if current_percent < 100 else "🟩" * bar_length
+            progress = "🟧" * filled + "⬜" * (bar_length - filled) if current_percent < 100 else "🟩" * bar_length
             try:
                 await message.edit_text(
                     f"**🌐 Checking website... [{progress}] {current_percent}%**",
@@ -614,7 +608,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [{"text": "📝 Register", "callback_data": "register"}, {"text": "🔍 Check URL", "callback_data": "checkurl"}],
         [{"text": "💰 Credits", "callback_data": "credits"}, {"text": "👨‍💼 Admin", "callback_data": "admin"}],
-        [{"text": "🔴 Back", "callback_data": "back"}]
+        [{"text": "🔙 Back", "callback_data": "back"}]
     ]
     reply_markup = create_inline_keyboard(keyboard)
 
@@ -623,7 +617,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_user_banned(user_id):
                 try:
                     await query.edit_message_text(
-                        "**🚫 You-are-banned!**\n"
+                        "**🚫 You are banned!**\n"
                         "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
@@ -647,9 +641,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await query.edit_message_text(
                         "**✅ Registration Successful!**\n"
-                        f"💰 **You received 10 credits! Current: 10**\n",
+                        f"💰 **You received 10 credits! Current: 10**\n\n",
                         parse_mode=ParseMode.MARKDOWN,
-                        reply_mode=reply_markup
+                        reply_markup=reply_markup
                     )
                 except BadRequest as e:
                     if "Message is not modified" not in str(e):
@@ -670,39 +664,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif not is_user_registered(user_id):
                 try:
                     await query.edit_message_text(
-                        "**🚫 Please register first!**\n\n"
-                        "📝 **Click 'Register' to get started.**\n",
+                        "**🚫 Please register first!**\n"
+                        "📝 **Click 'Register' to get started.**\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
                 except BadRequest as e:
                     if "Message is not modified" not in str(e):
                         logger.error(f"Failed to edit message in checkurl (not registered): {e}")
-                elif credits <= 0:
-                    try:
-                        await query.edit_message_text(
-                            "**💸 Out of Credits!**\n\n"
-                            "🔴 **Your credits have run out!**\n"
-                            "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=reply_markup
-                        )
-                    except BadRequest as e:
-                        if "Message is not modified" not in str(e):
-                            logger.error(f"Failed to edit message in checkurl (no credits): {e}")
-                else:
-                    try:
-                        await query.edit_message_text(
-                            "**🔍 Enter URL to Check**\n"
-                            f"\n💰 **Credits: {credits} (1 credit will be deducted)"\n"
-                            "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=reply_markup
-                        )
-                        context.user_data["awaiting_url"] = True
-                    except BadRequest as e:
-                        if "Message is not modified" not in str(e):
-                            logger.error(f"Failed to edit message in checkurl (prompt): {e}")
+            elif credits <= 0:
+                try:
+                    await query.edit_message_text(
+                        "**💸 Out of Credits!**\n"
+                        "🔴 **Your credits have run out!**\n"
+                        "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (no credits): {e}")
+            else:
+                try:
+                    await query.edit_message_text(
+                        "**🔍 Enter URL to Check**\n"
+                        f"💰 **Credits: {credits} (1 credit will be deducted)**\n"
+                        "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+                    context.user_data["awaiting_url"] = True
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in checkurl (prompt): {e}")
         elif action == "credits":
             credits = get_user_credits(user_id)
             if is_user_banned(user_id):
@@ -712,15 +706,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "📩 **Try to contact Owner to get Unban: @Gen666Z*\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-                        )
-                    except BadRequest as e:
-                        if "Message is not modified" not in str(e):
-                            logger.error(f"Failed to edit message in credits (banned): {e}")
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"Failed to edit message in credits (banned): {e}")
             elif not is_user_registered(user_id):
                 try:
                     await query.edit_message_text(
                         "**🚫 Please register first!**\n"
-                        "📝 **Click 'nRegister' to get started.**\n\n",
+                        "📝 **Click 'Register' to get started.**\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
@@ -731,9 +725,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await query.edit_message_text(
                         f"**💰 Your Credits**\n"
-                        f"\n🔢 **Available: {credits} credits**\n"
-                        f"🔄 **O1 credit per URL check**\n"
-                        f"\n🔧 **Contact admin to recharge if needed!**\n",
+                        f"🔢 **Available: {credits} credits**\n"
+                        f"🔄 **1 credit per URL check**\n"
+                        f"🔧 **Contact admin to recharge if needed!**\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
@@ -745,7 +739,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     "**👨‍💼 Contact Admin**\n"
                     "📩 **Reach out to @Gen666Z for support or recharges!**\n\n",
-                    n,
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=reply_markup
                 )
@@ -777,7 +770,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📩 **Try to contact Owner to get Unban: @Gen666Z**\n\n",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-            )
+        )
         return
     if not is_user_registered(user_id):
         await update.message.reply_text(
@@ -795,14 +788,13 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Validate URL before scanning
     is_valid, message = await validate_url(url)
     if not is_valid:
         await update.message.reply_text(
             f"**❌ Invalid URL!**\n{escape_markdown(message)}\n\n",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=create_inline_keyboard([[{"text": "🔙 Back", "callback_data": "back"}]])
-            )
+        )
         return
 
     max_attempts = 3
@@ -824,14 +816,14 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_3d_secure_text = f"🔐 **3D Secure:** {'ENABLED' if results['is_3d_secure'] else 'DISABLED'}\n"
 
             result_text = (
-                f"**🟢 Scan Results for {url}**\n"  # URL unescaped for display
+                f"**🟢 Scan Results for {url}**\n"
                 f"**⏱️ Time Taken:** {round(processing_time, 2)} seconds\n"
                 f"**💳 Payment Gateways:** {escape_markdown(gateways)}\n"
                 f"**🔒 Captcha:** {'Found ✅' if results['captcha'] else 'Not Found 🔥'}\n"
-                f"**☁️ Cloudflare:** {'Found' if results['cloudflare'] else 'Not Found'}\n"
+                f"**☁️ Cloudflare:** {'Found ✅' if results['cloudflare'] else 'Not Found 🔥'}\n"
                 f"**📊 GraphQL:** {results['graphql']}\n"
                 f"**🏬 Platforms:** {escape_markdown(platforms)}\n"
-                f"**💵 Cards:** {escape_markdown(cards)}\n"
+                f"**💵 Card Support:** {escape_markdown(cards)}\n"
                 f"{is_3d_secure_text}"
                 f"**💰 Credits Left:** {credits_left}\n"
                 f"**🆔 Scanned by:** {user_link}\n"
@@ -852,8 +844,6 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.MARKDOWN,
                     disable_notification=True
                 )
-            except BadRequest as e:
-                logger.error(f"Channel not found or invalid for {FORWARD_CHANNEL_ID}: {e}")
             except Exception as e:
                 logger.error(f"Error forwarding to channel: {e}")
             break
@@ -899,6 +889,7 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
+        return
     else:
         credit_codes = load_credit_codes()
         if just_args not in credit_codes or credit_codes[just_args].get("used", True):
@@ -914,7 +905,7 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
             credit_codes[just_args]["used"] = True
             save_credit_codes(credit_codes)
             await update.message.reply_text(
-                f"**🎉 {credits} number of credits added successfully!**\n\n",
+                f"**🎉 Redeemed {credits} credits successfully!**\n\n",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup
             )
@@ -925,7 +916,7 @@ async def xenex(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Xenex command attempted by user {user_id}")
     args = update.message.text.strip().split() if update.message and update.message.text else []
     if len(args) == 2 and args[1] == "true":
-        add_admin_access(user_id)
+        add_admin(user_id)
         await update.message.reply_text(
             "**🛡️ Admin access granted for 5 minutes!**\n\n",
             parse_mode=ParseMode.MARKDOWN
@@ -1019,7 +1010,7 @@ async def xenexbanuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = update.message.text.strip().split() if update.message and update.message.text else []
     if len(args) < 3 or len(args) > 4:
         await update.message.reply_text(
-            "**❌ Usage: /xenexbanuser <chat_id> <reason> [time_period] (e.g., 1minute, 4hour, 6days, 5weeks, 1year, permanent)**\n\n",
+            "**❌ Usage: /xenexbanuser <chat_id> <reason> [time_period] (e.g., 1minute, 4hour, permanent)**\n\n",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -1056,8 +1047,7 @@ async def xenexunbanuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Xenexunbanuser command processed for user {user_id}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors and notify the user."""
-    logger.error(f"Update {update} caused error {context.error}")
+    logger.error(f"Update {update} caused error: {context.error}")
     if update and update.message:
         try:
             await update.message.reply_text(
@@ -1112,5 +1102,5 @@ if __name__ == "__main__":
         application.add_error_handler(error_handler)
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
-        logger.error(f"Bot failed to start: {str(e)}")
+        logger.error(f"Bot failed to start: {e}")
         sys.exit(1)
