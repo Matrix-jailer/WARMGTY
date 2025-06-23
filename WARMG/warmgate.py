@@ -42,8 +42,11 @@ BOARD_MESSAGE_FILE = os.path.join(DATA_DIR, "boardmessage.json")
 def initialize_json_files():
     """Create empty JSON files if they don't exist to prevent warnings."""
     json_files = [
-        REGISTERED_USERS_FILE, ADMIN_ACCESS_FILE, CREDIT_CODES_FILE,
-        BAN_USERS_FILE, BOARD_MESSAGE_FILE
+        REGISTERED_USERS_FILE,
+        ADMIN_ACCESS_FILE,
+        CREDIT_CODES_FILE,
+        BAN_USERS_FILE,
+        BOARD_MESSAGE_FILE
     ]
     for file_path in json_files:
         if not os.path.exists(file_path):
@@ -58,6 +61,7 @@ def initialize_json_files():
 initialize_json_files()
 
 def install_playwright_once():
+    """Install Playwright browsers once per deployment."""
     if not os.path.exists(LOCK_FILE):
         print("[+] Installing Playwright browsers...")
         try:
@@ -88,22 +92,63 @@ FORWARD_CHANNEL_ID = "@mddj77273jdjdjd838383"
 
 # Extended Lists
 RELATED_PAGES = [
-    "/", "/checkout", "/buynow", "/cart", "/payment", "/order",
-    "/purchase", "/subscribe", "/confirm", "/billing", "/pay",
-    "/transactions", "/order-summary", "/complete", "/shop", "/buy",
-    "/proceed-to-checkout", "/payment-gateway", "/secure-checkout",
-    "/order-confirmation", "/payment-processing", "/finalize-order"
+    "/",
+    "/checkout",
+    "/buynow",
+    "/cart",
+    "/payment",
+    "/order",
+    "/purchase",
+    "/subscribe",
+    "/confirm",
+    "/billing",
+    "/pay",
+    "/transactions",
+    "/order-summary",
+    "/complete",
+    "/shop",
+    "/buy",
+    "/proceed-to-checkout",
+    "/payment-gateway",
+    "/secure-checkout",
+    "/order-confirmation",
+    "/payment-processing",
+    "/finalize-order"
 ]
 
 PAYMENT_GATEWAYS = [
-    "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
-    "authorize.net", "klarna", "checkout.com", "shopify_payments", "worldpay",
-    "2checkout", "amazon_pay", "apple_pay", "google_pay", "mollie", "opayo", "paddle"
+    "stripe",
+    "paypal",
+    "paytm",
+    "razorpay",
+    "square",
+    "adyen",
+    "braintree",
+    "authorize.net",
+    "klarna",
+    "checkout.com",
+    "shopify_payments",
+    "worldpay",
+    "2checkout",
+    "amazon_pay",
+    "apple_pay",
+    "google_pay",
+    "mollie",
+    "opayo",
+    "paddle"
 ]
 
 CAPTCHA_PATTERNS = [
-    r"g-recaptcha", r"data-sitekey", r"captcha", r"hcaptcha", r"protected by cloudflare",
-    r"turnstile", r"arkose-labs", r"funcaptcha", r"geetest", r"recaptcha/api.js"
+    r"g-recaptcha",
+    r"data-sitekey",
+    r"captcha",
+    r"hcaptcha",
+    r"protected by cloudflare",
+    r"turnstile",
+    r"arkose-labs",
+    r"funcaptcha",
+    r"geetest",
+    r"recaptcha/api.js"
 ]
 
 PLATFORM_KEYWORDS = {
@@ -115,24 +160,64 @@ PLATFORM_KEYWORDS = {
     "opencart": "OpenCart",
     "wix": "Wix",
     "squarespace": "Squarespace"
-]
+}
 
 CARD_KEYWORDS = [
-    "visa", "mastercard", "amex", "discover", "diners", "jcb", "unionpay",
-    "maestro", "mir", "rupay", "cartasi", "hipercard"
+    "visa",
+    "mastercard",
+    "amex",
+    "discover",
+    "diners",
+    "jcb",
+    "unionpay",
+    "maestro",
+    "mir",
+    "rupay",
+    "cartasi",
+    "hipercard"
 ]
 
 THREE_D_SECURE_KEYWORDS = [
-    "three_d_secure", "3dsecure", "acs", "acs_url", "acsurl", "redirect",
-    "secure-auth", "challenge", "3ds", "3ds1", "3ds2", "tds", "tdsecure",
-    "3d-secure", "three-d", "3dcheck", "3d-auth", "three-ds",
-    "stripe.com/3ds", "m.stripe.network", "hooks.stripe.com/3ds",
-    "paddle_frame", "paddlejs", "secure.paddle.com", "buy.paddle.com",
-    "idcheck", "garanti.com.tr", "adyen.com/hpp", "adyen.com/checkout",
-    "adyenpayments.com/3ds", "auth.razorpay.com", "razorpay.com/3ds",
-    "secure.razorpay.com", "3ds.braintreegateway.com", "verify.3ds",
-    "checkout.com/3ds", "checkout.com/challenge", "3ds.paypal.com",
-    "authentication.klarna.com", "secure.klarna.com/3ds"
+    "three_d_secure",
+    "3dsecure",
+    "acs",
+    "acs_url",
+    "acsurl",
+    "redirect",
+    "secure-auth",
+    "challenge",
+    "3ds",
+    "3ds1",
+    "3ds2",
+    "tds",
+    "tdsecure",
+    "3d-secure",
+    "three-d",
+    "3dcheck",
+    "3d-auth",
+    "three-ds",
+    "stripe.com/3ds",
+    "m.stripe.network",
+    "hooks.stripe.com/3ds",
+    "paddle_frame",
+    "paddlejs",
+    "secure.paddle.com",
+    "buy.paddle.com",
+    "idcheck",
+    "garanti.com.tr",
+    "adyen.com/hpp",
+    "adyen.com/checkout",
+    "adyenpayments.com/3ds",
+    "auth.razorpay.com",
+    "razorpay.com/3ds",
+    "secure.razorpay.com",
+    "3ds.braintreegateway.com",
+    "verify.3ds",
+    "checkout.com/3ds",
+    "checkout.com/challenge",
+    "3ds.paypal.com",
+    "authentication.klarna.com",
+    "secure.klarna.com/3ds"
 ]
 
 GATEWAY_KEYWORDS = {
@@ -374,7 +459,7 @@ async def scan_page(url, browser, retries=3, timeout=10000):
         "graphql": False,
         "platforms": set(),
         "card_support": set(),
-        "is_3d_secure": False,
+        "is_3d_secure": False
     }
     for attempt in range(retries):
         try:
@@ -496,7 +581,7 @@ async def scan_site_parallel(base_url, progress_callback=None):
         "graphql": False,
         "platforms": set(),
         "card_support": set(),
-        "is_3d_secure": False,
+        "is_3d_secure": False
     }
 
     async with async_playwright() as p:
@@ -575,8 +660,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_link = f"[@{escape_markdown(user.username)}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
     keyboard = [
-        [{"text": "📝 Register", "callback_data": "register"}, {"text": "🔍 Check URL", "callback_data": "checkurl"}],
-        [{"text": "💰 Credits", "callback_data": "credits"}, {"text": "👨‍💼 Admin", "callback_data": "admin"}]
+        [
+            {"text": "📝 Register", "callback_data": "register"},
+            {"text": "🔍 Check URL", "callback_data": "checkurl"}
+        ],
+        [
+            {"text": "💰 Credits", "callback_data": "credits"},
+            {"text": "👨‍💼 Admin", "callback_data": "admin"}
+        ]
     ]
     reply_markup = create_inline_keyboard(keyboard)
     is_registered = is_user_registered(user.id)
@@ -606,9 +697,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     keyboard = [
-        [{"text": "📝 Register", "callback_data": "register"}, {"text": "🔍 Check URL", "callback_data": "checkurl"}],
-        [{"text": "💰 Credits", "callback_data": "credits"}, {"text": "👨‍💼 Admin", "callback_data": "admin"}],
-        [{"text": "🔙 Back", "callback_data": "back"}]
+        [
+            {"text": "📝 Register", "callback_data": "register"},
+            {"text": "🔍 Check URL", "callback_data": "checkurl"}
+        ],
+        [
+            {"text": "💰 Credits", "callback_data": "credits"},
+            {"text": "👨‍💼 Admin", "callback_data": "admin"}
+        ],
+        [
+            {"text": "🔙 Back", "callback_data": "back"}
+        ]
     ]
     reply_markup = create_inline_keyboard(keyboard)
 
