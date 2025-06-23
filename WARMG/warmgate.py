@@ -1,14 +1,13 @@
 # @Gen666Z
 
 import sys
-import subprocess
 import os
 import re
 import time
+import telegram
 import random
 import socket
 import aiohttp
-import telegram
 import tldextract
 import asyncio
 import json
@@ -23,6 +22,10 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from tqdm import tqdm
 from colorama import Fore, Style
 
+# Configure logging
+import logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 LOCK_FILE = ".playwright_installed.lock"
 
@@ -43,19 +46,6 @@ def install_playwright_once():
 # Run it once per deployment
 install_playwright_once()
 
-def escape_markdown(text):
-    """Escape special Markdown characters to prevent parsing errors."""
-    if not text:
-        return text
-    special_chars = r'_*[]()~`>#+-.!'
-    for char in special_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
-# Configure logging
-import logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Color definitions (for potential future use)
 merah = Fore.LIGHTRED_EX
@@ -310,8 +300,7 @@ def load_board_message():
 
 # URL Validation
 async def validate_url(url):
-    extracted = tldextract.extract(url)
-    domain = ".".join(part for part in [extracted.domain, extracted.suffix] if part)
+    domain = tldextract.extract(url).top_domain_under_public_suffix
     if not domain:
         return False, "Invalid URL: No valid domain found."
 
@@ -649,8 +638,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user = update.effective_user  # ✅ ADD THIS LINE
-
     if not context.user_data.get("awaiting_url", False):
         return
     context.user_data["awaiting_url"] = False
@@ -711,7 +698,8 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             results = await scan_site_parallel(url, progress_callback=update_progress)
             processing_time = time.time() - start_time
 
-            user_link = f"[@{escape_markdown(user.username)}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
+            user = update.effective_user
+            user_link = f"[@{user.username}](tg://user?id={user.id})" if user.username else f"User_{user.id}"
             credits_left = get_user_credits(user_id)
             gateways = ', '.join(sorted(results['payment_gateways'])) if results['payment_gateways'] else 'None found'
             platforms = ', '.join(sorted(results['platforms'])) if results['platforms'] else 'Unknown'
@@ -719,17 +707,17 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_3d_secure_text = f"🔐 **3D Secure:** {'ENABLED' if results['is_3d_secure'] else 'DISABLED'}\n"
 
             result_text = (
-                f"*🟢 Scan Results for {escape_markdown(url)}*\n"
-                f"*⏱️ Time Taken:* {round(processing_time, 2)} seconds\n"
-                f"*💳 Payment Gateways:* {escape_markdown(gateways)}\n"
-                f"*🔒 Captcha:* {'Found ✅' if results['captcha'] else 'Not Found 🔥'}\n"
-                f"*☁️ Cloudflare:* {'Found ✅' if results['cloudflare'] else 'Not Found 🔥'}\n"
-                f"*📊 GraphQL:* {results['graphql']}\n"
-                f"*🏬 Platforms:* {escape_markdown(platforms)}\n"
-                f"*💵 Card Support:* {escape_markdown(cards)}\n"
+                f"**🟢 Scan Results for {url}**\n"
+                f"**⏱️ Time Taken:** {round(processing_time, 2)} seconds\n"
+                f"**💳 Payment Gateways:** {gateways.replace('<', '<').replace('>', '>')}\n"
+                f"**🔒 Captcha:** {'Found ✅' if results['captcha'] else 'Not Found 🔥'}\n"
+                f"**☁️ Cloudflare:** {'Found ✅' if results['cloudflare'] else 'Not Found 🔥'}\n"
+                f"**📊 GraphQL:** {results['graphql']}\n"
+                f"**🏬 Platforms:** {platforms.replace('<', '<').replace('>', '>')}\n"
+                f"**💵 Card Support:** {cards.replace('<', '<').replace('>', '>')}\n"
                 f"{is_3d_secure_text}"
-                f"*💰 Credit Left:* {credits_left}\n"
-                f"*🆔 Scanned by:* {user_link}\n"
+                f"**💰 Credit Left:** {credits_left}\n"
+                f"**🆔 Scanned by:** {user_link}\n"
             )
             try:
                 await progress_message.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
