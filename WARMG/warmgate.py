@@ -38,6 +38,25 @@ CREDIT_CODES_FILE = os.path.join(DATA_DIR, "creditcodes.json")
 BAN_USERS_FILE = os.path.join(DATA_DIR, "banusers.json")
 BOARD_MESSAGE_FILE = os.path.join(DATA_DIR, "boardmessage.json")
 
+# Initialize JSON files if they don't exist
+def initialize_json_files():
+    """Create empty JSON files if they don't exist to prevent warnings."""
+    json_files = [
+        REGISTERED_USERS_FILE, ADMIN_ACCESS_FILE, CREDIT_CODES_FILE,
+        BAN_USERS_FILE, BOARD_MESSAGE_FILE
+    ]
+    for file_path in json_files:
+        if not os.path.exists(file_path):
+            try:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+                logger.info(f"Initialized empty JSON file: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to initialize {file_path}: {e}")
+
+initialize_json_files()
+
 def install_playwright_once():
     if not os.path.exists(LOCK_FILE):
         print("[+] Installing Playwright browsers...")
@@ -148,11 +167,15 @@ TIME_CONVERSIONS = {
 }
 
 # Markdown Escaping
-def escape_markdown(text):
-    """Escape special Markdown characters to prevent parsing errors."""
+def escape_markdown(text, is_url=False):
+    """Escape special Markdown characters, preserving URLs if specified."""
     if not text:
         return text
-    special_chars = r'_*[]()~`>#+-.!|'
+    if is_url:
+        # For URLs, only escape minimal characters to avoid breaking the link
+        special_chars = r'[]()~`>#+-!|'
+    else:
+        special_chars = r'_*[]()~`>#+-.!|'
     for char in special_chars:
         text = text.replace(char, f'\\{char}')
     return text
@@ -161,12 +184,10 @@ def escape_markdown(text):
 def load_json(file_path):
     try:
         if not os.path.exists(file_path):
-            logger.warning(f"File {file_path} does not exist, returning empty dict")
             return {}
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
             if not content.strip():
-                logger.warning(f"File {file_path} is empty, returning empty dict")
                 return {}
             data = json.loads(content)
             if not isinstance(data, dict):
@@ -183,7 +204,7 @@ def load_json(file_path):
 def save_json(file_path, data):
     try:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
     except Exception as e:
         logger.error(f"Error saving {file_path}: {e}")
@@ -249,14 +270,14 @@ def is_admin(user_id):
         save_admin_access(admin_access)
     return False
 
-def add_admin_access(user_id):
+def add_admin(user_id):
     admin_access = load_admin_access()
     admin_access[str(user_id)] = time.time() + 300  # 5 minutes expiration
     save_admin_access(admin_access)
     asyncio.create_task(remove_admin_access_after_delay(user_id))
 
 async def remove_admin_access_after_delay(user_id):
-    await asyncio.sleep(300)  # 5 minutes
+    await asyncio.sleep(300)  # 5 minute
     admin_access = load_admin_access()
     if str(user_id) in admin_access:
         del admin_access[str(user_id)]
@@ -278,11 +299,12 @@ def is_user_banned(user_id):
     ban_users = load_ban_users()
     current_time = time.time()
     if str(user_id) in ban_users:
-        ban_info = ban_users[str(user_id)]
+        ban_info = ban_users.get(str(user_id)) ]
         if ban_info.get("expires", 0) > current_time or ban_info.get("expires") == "permanent":
             return True
-        del ban_users[str(user_id)]
-        save_ban_users(ban_users)
+        else:
+            del ban_users[str(user_id)]
+            save_ban_users(ban_users)
     return False
 
 def ban_user(user_id, reason, time_period):
@@ -296,15 +318,15 @@ def ban_user(user_id, reason, time_period):
             time_unit = time_period[-1]
             expires = time.time() + (time_value * TIME_CONVERSIONS.get(time_unit, 0))
         except (ValueError, IndexError):
-            expires = time.time() + 86400  # Default to 1 day
-    ban_users[str(user_id)] = {
-        "id": str(user_id),
-        "date": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "reason": reason,
-        "credits_last_time": credits,
-        "expires": expires
-    }
-    save_ban_users(ban_users)
+            expires = time.time() + 3600  # Default to 1 day
+        ban_users[str(user_id)] = {
+            "id": str(user_id),
+            "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": reason,
+            "credits_last_time": credits,
+            "expires": expires
+        }
+        save_ban_users(ban_users)
 
 def unban_user(user_id):
     ban_users = load_ban_users()
@@ -314,7 +336,7 @@ def unban_user(user_id):
 
 def load_board_message():
     data = load_json(BOARD_MESSAGE_FILE)
-    return data.get("message", "🌟 *No message set!*").strip() if data.get("message") else "🌟 *No message set!*"
+    return data.get("message", "🌟 *No message set!*").strip() if data.get("message") else "🌟 *No message set!*")
 
 # URL Validation
 async def validate_url(url):
@@ -347,7 +369,7 @@ async def validate_url(url):
         return False, f"Validation error: {str(e)}"
 
 # Web Scanning Functions
-async def scan_page(url, browser, retries=3):
+async def scan_page(url, browser, retries=3, timeout=10000):
     result = {
         "payment_gateways": set(),
         "captcha": False,
@@ -368,7 +390,7 @@ async def scan_page(url, browser, retries=3):
                         await asyncio.sleep(delay)
                         continue
                     if resp.status != 200:
-                        logger.warning(f"Non-200 status for {url}: {resp.status}")
+                        logger.debug(f"Non-200 status for {url}: {resp.status}")  # Changed to debug to reduce noise
                         return result
                     result["cloudflare"] = "cloudflare" in dict(resp.headers).get("server", "").lower()
 
@@ -376,41 +398,60 @@ async def scan_page(url, browser, retries=3):
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
                 extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
             )
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            
-            if response and response.status == 429:
+            try:
+                response = await asyncio.wait_for(
+                    page.goto(url, wait_until="domcontentloaded"),
+                    timeout=timeout / 1000
+                )
+                if response and response.status == 429:
+                    await page.close()
+                    delay = 2 ** attempt + random.uniform(0, 1)
+                    logger.warning(f"429 for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
+                    await asyncio.sleep(delay)
+                    continue
+                if response and response.status != 200:
+                    logger.debug(f"Non-200 status for {url}: {response.status}")
+                    await page.close()
+                    return result
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout navigating to {url} on attempt {attempt+1}/{retries}")
                 await page.close()
-                delay = 2 ** attempt + random.uniform(0, 1)
-                logger.warning(f"429 for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
-                await asyncio.sleep(delay)
-                continue
-            if response and response.status != 200:
-                logger.warning(f"Non-200 status for {url}: {response.status}")
+                if attempt < retries - 1:
+                    await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
+                    continue
+                return result
+
+            try:
+                html_content = await asyncio.wait_for(page.content(), timeout=timeout / 1000)
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout fetching content for {url}")
                 await page.close()
                 return result
 
-            html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
 
             result["cloudflare"] = result["cloudflare"] or ("cloudflare" in response.headers.get("server", "").lower() if response else False)
 
-            iframes = await page.query_selector_all("iframe")
-            for iframe in iframes:
-                try:
-                    frame = await iframe.content_frame()
-                    if frame:
-                        frame_url = frame.url.lower()
-                        if any(kw in frame_url for kw in THREE_D_SECURE_KEYWORDS):
-                            result["is_3d_secure"] = True
-                        frame_content = await frame.content()
-                        if any(kw in frame_content.lower() for kw in THREE_D_SECURE_KEYWORDS):
-                            result["is_3d_secure"] = True
-                except PlaywrightTimeoutError:
-                    logger.debug(f"Timeout accessing iframe on {url}")
-                    continue
-                except Exception as e:
-                    logger.debug(f"Error accessing iframe on {url}: {str(e)}")
-                    continue
+            try:
+                iframes = await page.query_selector_all("iframe")
+                for iframe in iframes:
+                    try:
+                        frame = await iframe.content_frame()
+                        if frame:
+                            frame_url = frame.url.lower()
+                            if any(kw in frame_url for kw in THREE_D_SECURE_KEYWORDS):
+                                result["is_3d_secure"] = True
+                            frame_content = await asyncio.wait_for(frame.content(), timeout=timeout / 2000)
+                            if any(kw in frame_content.lower() for kw in THREE_D_SECURE_KEYWORDS):
+                                result["is_3d_secure"] = True
+                    except (PlaywrightTimeoutError, asyncio.TimeoutError):
+                        logger.debug(f"Timeout accessing iframe on {url}")
+                        continue
+                    except Exception as e:
+                        logger.debug(f"Error accessing iframe on {url}: {str(e)}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Error querying iframes on {url}: {str(e)}")
 
             for gateway in PAYMENT_GATEWAYS:
                 if gateway in html_content.lower():
@@ -434,20 +475,21 @@ async def scan_page(url, browser, retries=3):
 
             await page.close()
             return result
-        except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout error for {url}: {e}")
+        except (PlaywrightTimeoutError, asyncio.TimeoutError) as e:
+            logger.warning(f"Timeout error for {url}: {e}")
             if attempt < retries - 1:
                 delay = 2 ** attempt + random.uniform(0, 1)
-                logger.warning(f"Timeout for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
                 await asyncio.sleep(delay)
                 continue
         except Exception as e:
-            logger.error(f"Scan error for {url}: {e}")
+            logger.warning(f"Scan error for {url}: {e}")
             if attempt < retries - 1:
                 delay = 2 ** attempt + random.uniform(0, 1)
-                logger.warning(f"Error for {url}, retrying after {delay:.2f}s ({attempt+1}/{retries})")
                 await asyncio.sleep(delay)
                 continue
+        finally:
+            if 'page' in locals():
+                await page.close()
     return result
 
 async def scan_site_parallel(base_url, progress_callback=None):
@@ -468,49 +510,58 @@ async def scan_site_parallel(base_url, progress_callback=None):
         sem = asyncio.Semaphore(2)
         async def limited_scan(url):
             async with sem:
-                return await scan_page(url, browser)
+                try:
+                    # Wrap scan_page in a timeout to prevent hanging
+                    return await asyncio.wait_for(
+                        scan_page(url, browser, timeout=10000),
+                        timeout=15
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Scan for {url} timed out after 15s, skipping")
+                    return aggregated_results
+                except Exception as e:
+                    logger.warning(f"Error scanning {url}: {e}, skipping")
+                    return aggregated_results
 
         completed_pages = 0
         total_pages = len(full_urls)
-        with tqdm(total=total_pages, desc="Scanning", unit="page", ncols=80, bar_format="{l_bar}{bar}") as pbar:
-            tasks = [limited_scan(url) for url in full_urls]
-            for coro in asyncio.as_completed(tasks):
-                try:
-                    page_results = await coro
+        tasks = [limited_scan(url) for url in full_urls]
+        try:
+            # Process tasks with a global timeout for the entire scan
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=60 * len(full_urls) // len(tasks)  # 60s per batch of 2
+            )
+            for page_results in results:
+                if isinstance(page_results, dict):
                     aggregated_results["payment_gateways"].update(page_results["payment_gateways"])
-                    aggregated_results["captcha"] = aggregated_results["captcha"] or page_results["captcha"]
-                    aggregated_results["cloudflare"] = aggregated_results["cloudflare"] or page_results["cloudflare"]
-                    aggregated_results["graphql"] = aggregated_results["graphql"] or page_results["graphql"]
+                    aggregated_results["captcha"] |= page_results["captcha"]
+                    aggregated_results["cloudflare"] |= page_results["cloudflare"]
+                    aggregated_results["graphql"] |= page_results["graphql"]
                     aggregated_results["platforms"].update(page_results["platforms"])
                     aggregated_results["card_support"].update(page_results["card_support"])
-                    aggregated_results["is_3d_secure"] = aggregated_results["is_3d_secure"] or page_results["is_3d_secure"]
-                    completed_pages += 1
-                    pbar.update(1)
-                    if progress_callback:
-                        await progress_callback(completed_pages, total_pages)
-                        await asyncio.sleep(0.1)  # Avoid Telegram rate limits
-                except Exception as e:
-                    logger.error(f"Error scanning page: {e}")
-                    completed_pages += 1
-                    pbar.update(1)
-                    if progress_callback:
-                        await progress_callback(completed_pages, total_pages)
-                        await asyncio.sleep(0.1)
-
-        await browser.close()
+                    aggregated_results["is_3d_secure"] |= page_results["is_3d_secure"]
+                completed_pages += 1
+                if progress_callback:
+                    await progress_callback(completed_pages, total_pages)
+                    await asyncio.sleep(0.1)  # Avoid Telegram rate limits
+        except asyncio.TimeoutError:
+            logger.warning(f"Global scan timeout for {base_url}, returning partial results")
+        finally:
+            await browser.close()
     return aggregated_results
 
 async def show_progress_bar(update: Update, context: ContextTypes.DEFAULT_TYPE, total_pages):
     message = await update.message.reply_text("**🌐 Checking website... [⬜⬜⬜⬜⬜] 0%**", parse_mode=ParseMode.MARKDOWN)
     bar_length = 5
-    last_percent = -1  # Ensure 0% is displayed initially
+    last_percent = -1
 
     async def update_progress(current, total):
         nonlocal last_percent
         current_percent = min(int((current / total) * 100), 100)
         if current_percent > last_percent:
             filled = int((current_percent / 100) * bar_length)
-            progress = "🟧" * filled + "⬜" * (bar_length - filled) if current_percent < 100 else "🟩" * bar_length
+            progress = "🟥" * filled + "⬜" * (bar_length - filled) if current_percent < 100 else "🟩" * bar_length
             try:
                 await message.edit_text(
                     f"**🌐 Checking website... [{progress}] {current_percent}%**",
@@ -520,7 +571,7 @@ async def show_progress_bar(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 if "Message is not modified" not in str(e):
                     logger.error(f"Failed to update progress bar: {e}")
             except telegram.error.TimedOut:
-                logger.warning("Telegram API timed out during progress update")
+                logger.warning("Timeout during progress update")
             last_percent = current_percent
 
     return message, update_progress
@@ -563,7 +614,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [{"text": "📝 Register", "callback_data": "register"}, {"text": "🔍 Check URL", "callback_data": "checkurl"}],
         [{"text": "💰 Credits", "callback_data": "credits"}, {"text": "👨‍💼 Admin", "callback_data": "admin"}],
-        [{"text": "🔙 Back", "callback_data": "back"}]
+        [{"text": "🔴 Back", "callback_data": "back"}]
     ]
     reply_markup = create_inline_keyboard(keyboard)
 
@@ -596,9 +647,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await query.edit_message_text(
                         "**✅ Registration Successful!**\n"
-                        f"💰 **You received 10 credits! Current: 10**\n\n",
+                        f"💰 **You received 10 credits! Current: 10**\n",
                         parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=reply_markup
+                        reply_mode=reply_markup
                     )
                 except BadRequest as e:
                     if "Message is not modified" not in str(e):
@@ -619,39 +670,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif not is_user_registered(user_id):
                 try:
                     await query.edit_message_text(
-                        "**🚫 Please register first!**\n"
-                        "📝 **Click 'Register' to get started.**\n\n",
+                        "**🚫 Please register first!**\n\n"
+                        "📝 **Click 'Register' to get started.**\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
                 except BadRequest as e:
                     if "Message is not modified" not in str(e):
                         logger.error(f"Failed to edit message in checkurl (not registered): {e}")
-            elif credits <= 0:
-                try:
-                    await query.edit_message_text(
-                        "**💸 Out of Credits!**\n"
-                        "🔴 **Your credits have run out!**\n"
-                        "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
-                        parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=reply_markup
-                    )
-                except BadRequest as e:
-                    if "Message is not modified" not in str(e):
-                        logger.error(f"Failed to edit message in checkurl (no credits): {e}")
-            else:
-                try:
-                    await query.edit_message_text(
-                        "**🔍 Enter URL to Check**\n"
-                        f"💰 **Credits: {credits} (1 credit will be deducted)**\n"
-                        "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
-                        parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=reply_markup
-                    )
-                    context.user_data["awaiting_url"] = True
-                except BadRequest as e:
-                    if "Message is not modified" not in str(e):
-                        logger.error(f"Failed to edit message in checkurl (prompt): {e}")
+                elif credits <= 0:
+                    try:
+                        await query.edit_message_text(
+                            "**💸 Out of Credits!**\n\n"
+                            "🔴 **Your credits have run out!**\n"
+                            "📩 **Contact Admin to recharge: @Gen666Z**\n\n",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=reply_markup
+                        )
+                    except BadRequest as e:
+                        if "Message is not modified" not in str(e):
+                            logger.error(f"Failed to edit message in checkurl (no credits): {e}")
+                else:
+                    try:
+                        await query.edit_message_text(
+                            "**🔍 Enter URL to Check**\n"
+                            f"\n💰 **Credits: {credits} (1 credit will be deducted)"}\n"
+                            "📝 **Send /url <url> (e.g., /url https://example.com)**\n\n",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=reply_markup
+                        )
+                        context.user_data["awaiting_url"] = True
+                    except BadRequest as e:
+                        if "Message is not modified" not in str(e):
+                            logger.error(f"Failed to edit message in checkurl (prompt): {e}")
         elif action == "credits":
             credits = get_user_credits(user_id)
             if is_user_banned(user_id):
@@ -661,15 +712,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "📩 **Try to contact Owner to get Unban: @Gen666Z*\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-                    )
-                except BadRequest as e:
-                    if "Message is not modified" not in str(e):
-                        logger.error(f"Failed to edit message in credits (banned): {e}")
+                        )
+                    except BadRequest as e:
+                        if "Message is not modified" not in str(e):
+                            logger.error(f"Failed to edit message in credits (banned): {e}")
             elif not is_user_registered(user_id):
                 try:
                     await query.edit_message_text(
                         "**🚫 Please register first!**\n"
-                        "📝 **Click 'Register' to get started.**\n\n",
+                        "📝 **Click 'nRegister' to get started.**\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
@@ -680,9 +731,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await query.edit_message_text(
                         f"**💰 Your Credits**\n"
-                        f"🔢 **Available: {credits} credits**\n"
-                        f"🔄 **1 credit per URL check**\n"
-                        f"🔧 **Contact admin to recharge if needed!**\n\n",
+                        f"\n🔢 **Available: {credits} credits**\n"
+                        f"🔄 **O1 credit per URL check**\n"
+                        f"\n🔧 **Contact admin to recharge if needed!**\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=reply_markup
                     )
@@ -694,6 +745,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     "**👨‍💼 Contact Admin**\n"
                     "📩 **Reach out to @Gen666Z for support or recharges!**\n\n",
+                    n,
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=reply_markup
                 )
@@ -725,7 +777,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📩 **Try to contact Owner to get Unban: @Gen666Z**\n\n",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
-        )
+            )
         return
     if not is_user_registered(user_id):
         await update.message.reply_text(
@@ -750,7 +802,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**❌ Invalid URL!**\n{escape_markdown(message)}\n\n",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=create_inline_keyboard([[{"text": "🔙 Back", "callback_data": "back"}]])
-        )
+            )
         return
 
     max_attempts = 3
@@ -772,16 +824,16 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_3d_secure_text = f"🔐 **3D Secure:** {'ENABLED' if results['is_3d_secure'] else 'DISABLED'}\n"
 
             result_text = (
-                f"**🟢 Scan Results for {escape_markdown(url)}**\n"
+                f"**🟢 Scan Results for {url}**\n"  # URL unescaped for display
                 f"**⏱️ Time Taken:** {round(processing_time, 2)} seconds\n"
                 f"**💳 Payment Gateways:** {escape_markdown(gateways)}\n"
                 f"**🔒 Captcha:** {'Found ✅' if results['captcha'] else 'Not Found 🔥'}\n"
-                f"**☁️ Cloudflare:** {'Found ✅' if results['cloudflare'] else 'Not Found 🔥'}\n"
+                f"**☁️ Cloudflare:** {'Found' if results['cloudflare'] else 'Not Found'}\n"
                 f"**📊 GraphQL:** {results['graphql']}\n"
                 f"**🏬 Platforms:** {escape_markdown(platforms)}\n"
-                f"**💵 Card Support:** {escape_markdown(cards)}\n"
+                f"**💵 Cards:** {escape_markdown(cards)}\n"
                 f"{is_3d_secure_text}"
-                f"**💰 Credit Left:** {credits_left}\n"
+                f"**💰 Credits Left:** {credits_left}\n"
                 f"**🆔 Scanned by:** {user_link}\n"
             )
             try:
@@ -791,7 +843,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error(f"Failed to edit final message: {e}")
                     await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
             except telegram.error.TimedOut:
-                logger.warning("Telegram API timed out during final message update")
+                logger.warning("Timeout during final message update")
                 await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
             try:
                 await context.bot.send_message(
@@ -807,30 +859,20 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
         except (NetworkError, TimedOut) as e:
             attempt += 1
-            logger.warning(f"Network error occurred: {e}. Attempt {attempt}/{max_attempts}. Retrying in {2 ** attempt} seconds...")
+            logger.warning(f"Network error occurred: {e}. Attempt {attempt+1}/{max_attempts}. Retrying in {2 ** attempt} seconds...")
             await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
             if attempt == max_attempts:
                 error_text = f"**❌ Failed to check URL due to network issues: {escape_markdown(str(e))}**\n\n"
                 try:
                     await progress_message.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
-                except telegram.error.BadRequest as e:
-                    if "Message is not modified" not in str(e):
-                        logger.error(f"Failed to edit error message: {e}")
-                    await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
-                except telegram.error.TimedOut:
-                    logger.warning("Telegram API timed out during error message update")
+                except:
                     await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
             logger.error(f"Error checking URL {url}: {e}")
             error_text = f"**❌ Error checking URL: {escape_markdown(str(e))}**\n\n"
             try:
                 await progress_message.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
-            except telegram.error.BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"Failed to edit error message: {e}")
-                    await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
-            except telegram.error.TimedOut:
-                logger.warning("Telegram API timed out during error message update")
+            except:
                 await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
             break
 
