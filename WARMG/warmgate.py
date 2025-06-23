@@ -299,7 +299,7 @@ def is_user_banned(user_id):
     ban_users = load_ban_users()
     current_time = time.time()
     if str(user_id) in ban_users:
-        ban_info = ban_users.get(str(user_id)) ]
+        ban_info = ban_users.get(str(user_id))
         if ban_info.get("expires", 0) > current_time or ban_info.get("expires") == "permanent":
             return True
         else:
