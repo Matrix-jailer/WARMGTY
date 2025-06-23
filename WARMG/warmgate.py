@@ -336,7 +336,7 @@ def unban_user(user_id):
 
 def load_board_message():
     data = load_json(BOARD_MESSAGE_FILE)
-    return data.get("message", "🌟 *No message set!*").strip() if data.get("message") else "🌟 *No message set!*")
+    return data.get("message", "🌟 *No message set!*").strip()
 
 # URL Validation
 async def validate_url(url):
@@ -623,7 +623,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_user_banned(user_id):
                 try:
                     await query.edit_message_text(
-                        "**🚫 You are banned!**\n"
+                        "**🚫 You-are-banned!**\n"
                         "📩 *Try to contact Owner to get Unban: @Gen666Z*\n\n",
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=create_inline_keyboard([[{"text": "👨‍💼 Admin", "callback_data": "admin"}]])
