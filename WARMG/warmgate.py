@@ -1,81 +1,40 @@
-# @Gen666Z
-
-import sys
 import os
-import re
 import subprocess
-import time
-import telegram
-import random
-import socket
-import aiohttp
-import tldextract
-import asyncio
-import json
-import requests
-import signal
-from urllib.parse import urlparse
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-from telegram.constants import ParseMode
-from telegram.error import BadRequest, NetworkError, TimedOut
-from tqdm import tqdm
-from colorama import Fore, Style
-
-# Configure logging
 import logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+import asyncio
+import random
+import requests
+import ssl
+import cloudscraper
+import re
+import tldextract
+from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
+)
 
-# File paths for persistent storage
-DATA_DIR = "/opt/render/data"
-LOCK_FILE = os.path.join(DATA_DIR, "playwright/.playwright_installed.lock")
-REGISTERED_USERS_FILE = os.path.join(DATA_DIR, "registered_users.json")
-ADMIN_ACCESS_FILE = os.path.join(DATA_DIR, "adminaccess.json")
-CREDIT_CODES_FILE = os.path.join(DATA_DIR, "creditcodes.json")
-BAN_USERS_FILE = os.path.join(DATA_DIR, "banusers.json")
-BOARD_MESSAGE_FILE = os.path.join(DATA_DIR, "boardmessage.json")
-
-# Initialize JSON files if they don't exist
-def initialize_json_files():
-    """Create empty JSON files if they don't exist to prevent warnings."""
-    json_files = [
-        REGISTERED_USERS_FILE,
-        ADMIN_ACCESS_FILE,
-        CREDIT_CODES_FILE,
-        BAN_USERS_FILE,
-        BOARD_MESSAGE_FILE
-    ]
-    for file_path in json_files:
-        if not os.path.exists(file_path):
-            try:
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump({}, f)
-                logger.info(f"Initialized empty JSON file: {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to initialize {file_path}: {e}")
-
-initialize_json_files()
+# Persistent browser storage
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/opt/render/data/playwright"
+LOCK_FILE = "/opt/render/data/playwright/.playwright_installed.lock"
 
 def install_playwright_once():
-    """Install Playwright browsers once per deployment."""
     if not os.path.exists(LOCK_FILE):
-        print("[+] Installing Playwright browsers...")
         try:
-            os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+            print("[+] Installing Playwright Chromium...")
             subprocess.run(["playwright", "install", "chromium"], check=True)
             with open(LOCK_FILE, "w") as f:
                 f.write("installed")
             print("[+] Playwright installation complete.")
         except Exception as e:
-            print(f"[ERROR] Playwright installation failed: {e}")
+            print(f"[ERROR] Failed to install Playwright: {e}")
     else:
         print("[✓] Playwright already installed. Skipping...")
 
-# Run it once per deployment
 install_playwright_once()
 
 # Color definitions
