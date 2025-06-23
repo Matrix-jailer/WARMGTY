@@ -289,7 +289,8 @@ def load_board_message():
 
 # URL Validation
 async def validate_url(url):
-    domain = tldextract.extract(url).top_domain_under_public_suffix
+    extracted = tldextract.extract(url)
+    domain = ".".join(part for part in [extracted.domain, extracted.suffix] if part)
     if not domain:
         return False, "Invalid URL: No valid domain found."
 
